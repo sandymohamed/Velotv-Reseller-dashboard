@@ -1,3 +1,4 @@
+import { money, sameTerms, timestamp } from './commerce';
 import React, { useEffect, useRef, useState } from 'react';
 import { CircleAlert, X } from 'lucide-react';
 
@@ -16,7 +17,7 @@ export function date(value) {
 const labels = {
   active: 'Active', expired: 'Expired',
   used: 'Used', available: 'Available', unknown: 'Unavailable',
-  completed: 'Completed', incomplete: 'Incomplete',
+  completed: 'Completed', incomplete: 'Incomplete', fulfilled: 'Completed', pending: 'Pending payment',
 };
 export function State({ value }) {
   return <span className={'state state-' + value}>{labels[value] || 'Unknown'}</span>;
@@ -138,43 +139,69 @@ export function Activation({ seed, api, catalog, close, done }) {
   </Dialog>;
 }
 
-export function BillingAction({ seed, api, close, done, checkout }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const operation = useRef(null);
-  const { kind, pack } = seed;
-  const title = kind === 'balance' ? 'Add credits' : 'Purchase ' + pack.package_name;
-
+export function BillingAction({ seed, api, close, done, checkout, onCatalogChange, onHistory }) {
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const [paypalUncertain,setPaypalUncertain]=useState(false);
+  const [walletUncertain,setWalletUncertain]=useState(false);
+  const operation=useRef(null);
+  const paypalAttempted=useRef(false);
+  const { kind,pack }=seed;
+  const title=kind==='balance'?'Add wallet funds':'Purchase '+pack.package_name;
   async function submit(event) {
-    event.preventDefault();
-    if (busy) return;
-    const amount = new FormData(event.currentTarget).get('amount');
-    setBusy(true);
-    setError('');
+    event.preventDefault();if(busy||paypalAttempted.current)return;
+    const amount=new FormData(event.currentTarget).get('amount');
+    setBusy(true);setError('');
     try {
-      if (kind === 'credits') {
-        // Keep the same operation reference across retries within this confirmation.
+      // Wallet retries must reach the original idempotent operation even when its
+      // offer is now exhausted, because the first response may have been lost.
+      if(kind!=='balance'&&!operation.current){
+        const latest=await api('/reseller/dashboard/catalog');
+        const current=latest.packages.find(item=>Number(item.id)===Number(pack.id));
+        if(!current||!sameTerms(current,pack)){
+          onCatalogChange?.();
+          throw new Error('This package or its price has changed. Close this dialog and review the refreshed packages.');
+        }
+      }
+      const offer=pack ? {
+        ...(pack.offer_id ? {offer_id:Number(pack.offer_id)} : {}),
+        expected_terms:{amount:String(pack.package_amount),periods:Number(pack.periods),count_devices:Number(pack.count_devices),offer_id:pack.offer_id?Number(pack.offer_id):null},
+      } : {};
+      if(kind==='credits'){
         operation.current ??= globalThis.crypto.randomUUID();
-        await api('/reseller/coupon', { body: { package: pack.id }, key: operation.current });
-        done('Purchase complete. Your new coupons are available in Coupons.');
-      } else {
-        const result = kind === 'balance'
-          ? await api('/reseller/paybalance/paypal/pay', { body: { amount } })
-          : await api('/reseller/pay/paypal/pay', { body: { package_id: pack.id } });
+        const result=await api('/reseller/coupon',{body:{package:pack.id,...offer},key:operation.current});
+        done(`Purchase complete${result.purchase?.amount ? ' · '+money(result.purchase.amount) : ''}. Your activation codes are available in Coupons.`);
+      }else{
+        paypalAttempted.current=true;
+        const result=kind==='balance'
+          ?await api('/reseller/paybalance/paypal/pay',{body:{amount}})
+          :await api('/reseller/pay/paypal/pay',{body:{package_id:pack.id,...offer}});
         checkout(result.redirectUrl);
       }
-    } catch (failure) {
-      setError(failure.message);
-    } finally { setBusy(false); }
+    }catch(failure){
+      setError(failure.status===409 ? 'The package price, activation terms or offer availability changed. Refresh Packages and check Package purchases for pending PayPal checkouts.' : failure.message);
+      if(failure.status===409)onCatalogChange?.();
+      if(kind==='credits'&&operation.current&&![400,401,403,404,409,503].includes(failure.status))setWalletUncertain(true);
+      if(paypalAttempted.current){
+        if([400,401,403,404,409,503].includes(failure.status))paypalAttempted.current=false;
+        else setPaypalUncertain(true);
+      }
+    }finally{setBusy(false);}
   }
-
   return <Dialog title={title} busy={busy} close={close}>
     <form className="form dialog-form" onSubmit={submit}>
-      {kind === 'balance' ? <label>Amount in EUR<input name="amount" type="number" min="0.01" max="99999.99" step="0.01" required placeholder="10.00" /></label>
-        : <p className="muted">{pack.count_devices} coupons · {pack.periods} mo each · {number(pack.package_amount)} {kind === 'credits' ? 'credits' : 'EUR'}</p>}
-      {error && <p className="notice error" role="alert">{error}</p>}
-      <div className="actions end"><button type="button" className="secondary" disabled={busy} onClick={close}>Cancel</button>
-        <button className="primary" disabled={busy}>{busy ? 'Processing…' : kind === 'credits' ? 'Confirm purchase' : 'Continue to PayPal'}</button></div>
+      {kind==='balance'?<label>Amount in EUR<input name="amount" type="number" min="0.01" max="99999.99" step="0.01" required placeholder="10.00"/></label>:
+        <div className="checkout-summary"><strong>{pack.count_devices} activations · {pack.periods} {Number(pack.periods)===1?'month':'months'} per device</strong>
+          <p>Base price: {money(pack.base_amount ?? pack.package_amount)}</p><p>Total: <strong>{money(pack.package_amount)}</strong></p>
+          {pack.offer_id&&<><p>Offer: {pack.offer_name}</p><p className="offer-meta">Ends {timestamp(pack.offer_ends_at)}{pack.max_purchases_per_reseller!=null&&` · Max ${pack.max_purchases_per_reseller} purchase(s) per reseller`}</p></>}
+          <p className="muted">{kind==='credits'?'This amount will be deducted from your EUR wallet.':'Payment will be collected by PayPal. Starting checkout reserves your offer slot.'}</p>
+        </div>}
+      {error&&<p className="notice error" role="alert">{error}</p>}
+      {paypalUncertain&&<p className="notice">Checkout could not be confirmed. Review your purchase history before starting another payment. Contact support if the order remains pending.</p>}
+      {walletUncertain&&<p className="notice">The purchase response was not confirmed. Retry in this dialog to check the same operation, or review purchase history before buying again.</p>}
+      <div className="actions end"><button type="button" className="secondary" disabled={busy} onClick={close}>Close</button>
+        {(paypalUncertain||walletUncertain)&&<button type="button" className="secondary" onClick={()=>onHistory(kind==='balance'?'billing':'purchases')}>{kind==='balance'?'Billing':'Purchase history'}</button>}
+        <button className="primary" disabled={busy||paypalUncertain}>{busy?'Processing…':kind==='credits'?'Confirm '+money(pack.package_amount):'Continue to PayPal'}</button></div>
     </form>
   </Dialog>;
 }
@@ -185,13 +212,13 @@ export function PaymentTables({ state }) {
     <section className="panel section"><div className="section-head"><h2>Balance payments</h2></div>
       <DataTable state={state} rows={state.value?.balance} empty="No balance payments yet." columns={[
         ['Date', row => date(row.created_at)], ['Reference', row => row.paymentID], ['Method', row => row.methode],
-        ['Amount', row => number(row.payment_amount)], ['Credits', row => number(row.credits)], ['Status', paymentState],
+        ['Paid amount', row => number(row.payment_amount)], ['Wallet added (EUR)', row => money(row.credits)], ['Status', paymentState],
       ]} />
     </section>
     <section className="panel section"><div className="section-head"><h2>Package payments</h2></div>
       <DataTable state={state} rows={state.value?.packages} empty="No package payments yet." columns={[
         ['Date', row => date(row.createdtime)], ['Reference', row => row.paymentID], ['Package', row => '#' + row.packages],
-        ['Amount', row => number(row.payment_amount)], ['Status', paymentState],
+        ['Paid amount', row => number(row.payment_amount)], ['Status', paymentState],
       ]} />
     </section>
   </>;

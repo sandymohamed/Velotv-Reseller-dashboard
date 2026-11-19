@@ -1,3 +1,6 @@
+import PurchaseHistory from './PurchaseHistory';
+import { money, parseDate, timestamp } from './commerce';
+import './commerce.css';
 import DevicePlaylists from './DevicePlaylists';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -14,6 +17,7 @@ const nav = [
   ['coupons', 'Coupons', Ticket],
   ['packages', 'Packages', CreditCard],
   ['billing', 'Billing', Wallet],
+  ['purchases', 'Package purchases', CreditCard],
 ];
 const sessionKey = 'velotv-reseller-session';
 function loadSession() {
@@ -143,7 +147,7 @@ function Overview({ api, revision, balance, go, onActivate }) {
       <button className="hero-button" onClick={() => onActivate({})}><Plus size={18} /> Activate device</button>
     </div><div className="hero-art" aria-hidden="true"><Monitor size={106} strokeWidth={1} /><Play size={24} fill="currentColor" /></div></section>
     <div className="metrics">
-      <Metric icon={Wallet} tone="violet" label="Credit balance" value={number(balance.value?.solde)} />
+      <Metric icon={Wallet} tone="violet" label="Wallet balance (EUR)" value={money(balance.value?.solde)} />
       <Metric icon={Ticket} tone="blue" label="Available coupons" value={number(available.value?.count)} />
       <Metric icon={Monitor} tone="green" label="Active devices" value={number(active.value?.count)} />
       <Metric icon={Activity} tone="amber" label="Total devices" value={number(devices.value?.count)} />
@@ -155,28 +159,41 @@ function Overview({ api, revision, balance, go, onActivate }) {
   </>;
 }
 
-function Packages({ catalog, onBuy }) {
+function Packages({ catalog, onBuy, balance, onRefresh }) {
+  const [now,setNow] = useState(Date.now());
+  useEffect(() => { const timer=setInterval(()=>setNow(Date.now()),10000); return ()=>clearInterval(timer); },[]);
   if (catalog.loading || catalog.error) return <p className={'notice ' + (catalog.error ? 'error' : '')}>{catalog.error || 'Loading packages…'}</p>;
   const packs = catalog.value?.packages || [];
-  if (!packs.length) return <p className="notice">No reseller packages are configured.</p>;
-  return <div className="packages">{packs.map(pack => <article className="panel package" key={pack.id}>
-    <div className="metric-icon violet"><Ticket size={21} /></div>
-    <h2>{pack.package_name}</h2>
-    <p>{pack.count_devices} coupons · {pack.periods} {pack.periods === 1 ? 'month' : 'months'} each</p>
-    <strong>{number(pack.package_amount)} <span>credits</span></strong>
-    <div className="actions"><button className="primary" onClick={() => onBuy({ pack, kind: 'credits' })}>Buy with credits</button>
-      <button className="secondary" onClick={() => onBuy({ pack, kind: 'package' })}>PayPal</button></div>
-  </article>)}</div>;
+  if (!packs.length) return <p className="notice">No packages are currently available for your account. Trial offers may be expired, restricted or already purchased.</p>;
+  return <><p className="notice">Wallet funds are in EUR. One annual activation credit activates one device for 12 months. Trial activations use the duration shown on the package.</p>
+    <div className="packages">{packs.map(pack => {
+      const end=parseDate(pack.offer_ends_at);
+      const expired=Boolean(pack.offer_id && end && now>=end.valueOf());
+      const insufficient=balance.loading || !balance.value || Number(balance.value.solde)<Number(pack.package_amount);
+      return <article className="panel package" key={pack.id}>
+        <div className="metric-icon violet"><Ticket size={21} /></div>
+        {pack.offer_id && <span className="offer-badge">{expired?'Offer ended':pack.offer_name}</span>}
+        <h2>{pack.package_name}</h2>
+        <p>{pack.count_devices} {Number(pack.periods)===12?'annual activation credits':'activations'} · {pack.periods} {Number(pack.periods)===1?'month':'months'} per device</p>
+        <strong>{Number(pack.base_amount)>Number(pack.package_amount)&&<del className="original-price">{money(pack.base_amount)}</del>}{money(pack.package_amount)}</strong>
+        <p className="offer-meta">{money(Number(pack.package_amount)/Number(pack.count_devices))} per device for {pack.periods} months</p>
+        {pack.offer_id && <p className="offer-meta">Ends {timestamp(pack.offer_ends_at)}<br/>{pack.max_purchases_per_reseller==null?'No purchase limit':`Maximum ${pack.max_purchases_per_reseller} purchase(s) per reseller for this offer.`}</p>}
+        {insufficient&&!expired&&<p className="offer-meta">{balance.loading?'Checking wallet…':balance.error?'Wallet balance unavailable.':'Add funds in Billing to buy with your wallet.'}</p>}
+        {expired?<button className="secondary" onClick={onRefresh}>Refresh available prices</button>:<div className="actions">
+          <button className="primary" disabled={insufficient} onClick={()=>onBuy({pack,kind:'credits'})}>Buy with EUR wallet</button>
+          <button className="secondary" onClick={()=>onBuy({pack,kind:'package'})}>PayPal</button></div>}
+      </article>;
+    })}</div></>;
 }
 
 function Billing({ api, revision, balance, onBuy }) {
   const ledger = useData(api, '/reseller/service/payment', revision);
   const payments = useData(api, '/reseller/dashboard/payments', revision);
   return <>
-    <div className="panel balance"><div><span>Available credit balance</span><strong>{number(balance.value?.solde)}</strong></div>
-      <button className="primary" onClick={() => onBuy({ kind: 'balance' })}><Plus size={17} /> Add credits</button></div>
+    <div className="panel balance"><div><span>Available wallet balance</span><strong>{money(balance.value?.solde)}</strong></div>
+      <button className="primary" onClick={() => onBuy({ kind: 'balance' })}><Plus size={17} /> Add funds</button></div>
     {balance.error && <p className="notice error" role="alert">{balance.error}</p>}
-    <Section title="Credit history"><DataTable state={ledger} rows={ledger.value?.data} empty="No credit transactions yet." columns={[
+    <Section title="Wallet history (EUR)"><DataTable state={ledger} rows={ledger.value?.data} empty="No credit transactions yet." columns={[
       ['Date', row => date(row.created_at)], ['Description', row => row.message],
       ['Previous balance', row => number(row.oldcredits)], ['New balance', row => number(row.newcredits)],
       ['Change', row => { const diff = Number(row.newcredits) - Number(row.oldcredits); const Icon = diff >= 0 ? ArrowUpRight : ArrowDownLeft;
@@ -190,8 +207,9 @@ const subtitles = {
   overview: 'Your device activations, coupons and reseller balance.',
   devices: 'Search, track and renew devices activated by your account.',
   coupons: 'Find available coupons and see where they were redeemed.',
-  packages: 'Choose a coupon package and pay with credits or PayPal.',
-  billing: 'Top up your credits and review payment activity.',
+  packages: 'Choose activation packages and eligible offers. All prices are in EUR.',
+  billing: 'Add EUR wallet funds and review payment activity.',
+  purchases: 'Your saved package prices, offers, activation durations and payment status.',
 };
 
 export default function App() {
@@ -244,7 +262,7 @@ export default function App() {
     <main id="content" className="main">
       <header className="topbar"><button className="icon-button hamburger" aria-label="Open navigation" onClick={() => setMenu(true)}><Menu size={22} /></button>
         <div className="breadcrumbs">Workspace <ChevronRight size={14} /> <strong>{nav.find(item => item[0] === page)[1]}</strong></div>
-        <div className="top-right"><span className="balance-pill"><Wallet size={17} /> {number(balance.value?.solde)} credits</span>
+        <div className="top-right"><span className="balance-pill"><Wallet size={17} /> {money(balance.value?.solde)}</span>
           <button className="icon-button" aria-label="Refresh dashboard" title="Refresh dashboard" onClick={() => setRevision(value => value + 1)}><RefreshCw size={17} /></button></div>
       </header>
       <div className="content">
@@ -255,12 +273,13 @@ export default function App() {
           PayPal return received. Check Billing or Coupons for the server-confirmed result.</p>}
         {page === 'overview' && <Overview api={api} revision={revision} balance={balance} go={go} onActivate={activate} />}
         {['devices', 'coupons'].includes(page) && <Listing key={page} pageName={page} api={api} revision={revision} onActivate={activate} onPlaylists={device => setModal({ type: 'playlists', device })} />}
-        {page === 'packages' && <Packages catalog={catalog} onBuy={buy} />}
+        {page === 'packages' && <Packages catalog={catalog} onBuy={buy} balance={balance} onRefresh={()=>setRevision(value=>value+1)} />}
+        {page === 'purchases' && <PurchaseHistory api={api} revision={revision}/>}
         {page === 'billing' && <Billing api={api} revision={revision} balance={balance} onBuy={buy} />}
       </div>
     </main>
     {modal?.type === 'playlists' && <DevicePlaylists api={api} device={modal.device} close={() => setModal(null)}/> }
     {modal?.type === 'activation' && <Activation seed={modal.seed} api={api} catalog={catalog} close={() => setModal(null)} done={done} />}
-    {modal?.type === 'billing' && <BillingAction seed={modal.seed} api={api} close={() => setModal(null)} done={done} checkout={checkout} />}
+    {modal?.type === 'billing' && <BillingAction seed={modal.seed} api={api} close={() => setModal(null)} done={done} checkout={checkout} onCatalogChange={()=>setRevision(value=>value+1)} onHistory={name=>{setModal(null);go(name);}} />}
   </div>;
 }
