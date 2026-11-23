@@ -11,7 +11,7 @@ import {
 import { checkout, request } from './api';
 import { Activation, BillingAction, DataTable, date, number, PaymentTables, State } from './components';
 import PasswordSettings from './PasswordSettings';
-import logo from './velotv-logo.png';
+import logo from './velotv-icon.png';
 
 const nav = [
   ['overview', 'Overview', LayoutDashboard],

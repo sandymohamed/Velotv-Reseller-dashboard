@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { money, snapshot, timestamp } from './commerce';
 
 function PurchaseDetails({ row, close }) {
