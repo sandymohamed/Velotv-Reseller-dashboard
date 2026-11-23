@@ -36,6 +36,12 @@ svg { flex: none; vertical-align: middle; }
 .sidebar { background: var(--navy); color: white; min-height: 100vh; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; padding: 30px 17px 20px; }
 .brand { display: flex; gap: 12px; align-items: center; font-weight: 760; font-size: 1.26rem; letter-spacing: -.045em; }
 .brand-icon { display: grid; place-items: center; width: 41px; height: 41px; border-radius: 12px; background: #7254f2; color: #fff; box-shadow: 0 5px 17px #3423a960; }
+.brand-logo { width: 46px; height: 68px; object-fit: contain; flex: none; }
+.password-panel { max-width: 620px; padding: 22px; display: grid; gap: 20px; }
+.password-panel .muted { margin-top: 7px; }
+.forced-password { min-height: 100vh; display: grid; align-content: start; justify-items: center; gap: 22px; padding: 28px 16px; }
+.forced-password > .brand { color: var(--ink); }
+.forced-password .brand span { color: var(--muted); }
 .brand span { display: block; font-size: .74rem; font-weight: 550; color: #aebbd4; letter-spacing: .01em; margin-top: 3px; }
 .sidebar .brand { margin: 0 8px 41px; }
 .sidebar nav { display: grid; gap: 6px; }

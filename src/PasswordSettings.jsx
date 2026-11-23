@@ -1,0 +1,9 @@
+import React,{useState} from 'react';
+export default function PasswordSettings({api,forced=false}){
+  const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState('');
+  async function submit(event){event.preventDefault();if(busy)return;const form=event.currentTarget,data=new FormData(form);setBusy(true);setError('');setMessage('');if(data.get('new_password')!==data.get('confirm_password')){setError('The new passwords do not match.');setBusy(false);return;}
+    try{await api('/reseller/dashboard/password',{body:{current_password:data.get('current_password'),new_password:data.get('new_password')}});setMessage('Password updated successfully.');form.reset();if(forced){const session=JSON.parse(sessionStorage.getItem('velotv-reseller-session'));sessionStorage.setItem('velotv-reseller-session',JSON.stringify({...session,mustChangePassword:false}));window.location.reload();}}catch(err){setError(err.message);}finally{setBusy(false);}}
+  return <section className="panel password-panel"><div><h2>{forced?'Set your new password':'Update password'}</h2><p className="muted">Use your current password, then choose a new password with at least 10 characters.</p></div><form className="form" onSubmit={submit}>
+    <label>Current password<input name="current_password" type="password" autoComplete="current-password" required maxLength="72"/></label><label>New password<input name="new_password" type="password" autoComplete="new-password" required minLength="10" maxLength="72"/></label><label>Confirm new password<input name="confirm_password" type="password" autoComplete="new-password" required minLength="10" maxLength="72"/></label>
+    {error&&<p className="notice error" role="alert">{error}</p>}{message&&<p className="notice success" role="status">{message}</p>}<button className="primary" disabled={busy}>{busy?'Updating…':'Update password'}</button></form></section>;
+}

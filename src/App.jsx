@@ -4,12 +4,14 @@ import './commerce.css';
 import DevicePlaylists from './DevicePlaylists';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight,
+  Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, KeyRound,
   CircleAlert, CreditCard, LayoutDashboard, LogOut, Menu, Monitor, Play, Plus,
   RefreshCw, Search, Ticket, Wallet, X,
 } from 'lucide-react';
 import { checkout, request } from './api';
 import { Activation, BillingAction, DataTable, date, number, PaymentTables, State } from './components';
+import PasswordSettings from './PasswordSettings';
+import logo from './velotv-logo.png';
 
 const nav = [
   ['overview', 'Overview', LayoutDashboard],
@@ -18,6 +20,7 @@ const nav = [
   ['packages', 'Packages', CreditCard],
   ['billing', 'Billing', Wallet],
   ['purchases', 'Package purchases', CreditCard],
+  ['password', 'Update password', KeyRound],
 ];
 const sessionKey = 'velotv-reseller-session';
 function loadSession() {
@@ -25,7 +28,7 @@ function loadSession() {
 }
 
 function Brand() {
-  return <div className="brand"><div className="brand-icon"><Play size={19} fill="currentColor" /></div>
+  return <div className="brand"><img className="brand-logo" src={logo} alt="VeloTV official logo"/>
     <div>VeloTV<span>Reseller workspace</span></div></div>;
 }
 
@@ -41,7 +44,7 @@ function Login({ onLogin, expired }) {
       const data = await request('/reseller/user/login', {
         body: { username: fields.get('username').trim(), password: fields.get('password') },
       });
-      onLogin({ token: data.result, account: data.payload });
+      onLogin({ token: data.result, account: data.payload, mustChangePassword: Boolean(data.payload.must_change_password) });
     } catch (failure) {
       setError(failure.message);
     } finally {
@@ -210,6 +213,7 @@ const subtitles = {
   packages: 'Choose activation packages and eligible offers. All prices are in EUR.',
   billing: 'Add EUR wallet funds and review payment activity.',
   purchases: 'Your saved package prices, offers, activation durations and payment status.',
+  password: 'Change your account password.',
 };
 
 export default function App() {
@@ -243,6 +247,7 @@ export default function App() {
     setSession(value);
     setExpired(false);
   }} />;
+  if (session.mustChangePassword) return <main className="forced-password"><Brand/><PasswordSettings api={api} forced/></main>;
   const accountName = session.account?.username || session.account?.email || 'Reseller';
   const go = name => { setPage(name); setMenu(false); setMessage(''); };
   const activate = seed => setModal({ type: 'activation', seed });
@@ -271,6 +276,7 @@ export default function App() {
         {message && <div className="notice success" role="status">{message}<button className="icon-button" aria-label="Dismiss message" onClick={() => setMessage('')}><X size={16} /></button></div>}
         {new URLSearchParams(window.location.search).get('checkout') && <p className="notice"><CircleAlert size={17} />
           PayPal return received. Check Billing or Coupons for the server-confirmed result.</p>}
+        {page === 'password' && <PasswordSettings api={api}/>}
         {page === 'overview' && <Overview api={api} revision={revision} balance={balance} go={go} onActivate={activate} />}
         {['devices', 'coupons'].includes(page) && <Listing key={page} pageName={page} api={api} revision={revision} onActivate={activate} onPlaylists={device => setModal({ type: 'playlists', device })} />}
         {page === 'packages' && <Packages catalog={catalog} onBuy={buy} balance={balance} onRefresh={()=>setRevision(value=>value+1)} />}
